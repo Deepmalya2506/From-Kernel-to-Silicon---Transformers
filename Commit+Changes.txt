@@ -1,0 +1,11 @@
+Why the change was necessary:
+Previously, the model was a simple Bigram model where the embedding table directly mapped token indices to output logits. This meant the embedding dimension was strictly tied to the vocabulary size. By introducing n_embed (number of embedding dimensions), the model gains several advantages:
+
+Flexibility and Scaling: We can now decouple the representation size (n_embed) from the output vocabulary size. This allows the hidden states to carry more complex information (e.g., 32 or 384 dimensions) while keeping the output vocabulary fixed at 65 characters.
+Architectural Modularity: This change introduces a "level of indirection." We create an intermediate hidden state that can be passed through layers (like self-attention blocks) before finally being projected back to the logits at the very end.
+Preparing for Transformers: As we move toward building a full Transformer, the model needs to process tokens as feature vectors that interact and evolve through multiple layers. A single direct lookup table cannot support this type of layered computation.
+What changed in the code:
+Token Embeddings: Instead of mapping directly to logits, we now map input indices to a feature vector of size n_embed.
+LM Head: We added self.lm_head (a linear layer), which takes the processed feature vectors (the output of our future Transformer blocks) and projects them into the final logit scores for the 65 possible characters.
+Intermediate Processing: This structure allows us to insert the Transformer blocks in the middle. The input x flows through the token embedding, undergoes transformations in the self-attention blocks, and then hits the lm_head to generate the final prediction.2
+
