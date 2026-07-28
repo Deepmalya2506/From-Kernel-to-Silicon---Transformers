@@ -30,3 +30,12 @@ We have split the process into two distinct stages:
 This **level of indirection** is essential for building a **Transformer**:
 1.  **Flexibility**: You can now choose any `n_embed` size to increase the model's internal processing power without forcing the input layer to match the output vocabulary size.
 2.  **Intermediate Processing**: Between the `token_embedding_table` and the `lm_head`, we now have the empty space required to insert **Self-Attention blocks** and **Feed-Forward layers**. The data starts as an embedding, gets transformed and "thinks" through multiple layers, and finally gets decoded by the `lm_head`.
+
+
+Earlier we used to 
+create Embeddings_table(random values) -> (forward function) get direct logits or votes for the next word from Embeddings_table(idx) - optimise the random embedding value using loss func -> generate for batches and timesteps from the Embeddings table 
+
+After modification of the architecture a little 
+create Embeddings_table, create lang model head -> (forward function) get token head from the Embedding_table then use this lm_head(token embedd) to get the logits. This step is the flexibility we give to the architecture -> generate for batches 
+
+Earlier we followed a rigid system or architecture with no room for reasoning, with the update in the architecture, lm_head (linear projection to logits). We allow the model to transform the raw input into a sophisticated internal representation before making a final prediction.
