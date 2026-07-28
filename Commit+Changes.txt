@@ -9,3 +9,24 @@ Token Embeddings: Instead of mapping directly to logits, we now map input indice
 LM Head: We added self.lm_head (a linear layer), which takes the processed feature vectors (the output of our future Transformer blocks) and projects them into the final logit scores for the 65 possible characters.
 Intermediate Processing: This structure allows us to insert the Transformer blocks in the middle. The input x flows through the token embedding, undergoes transformations in the self-attention blocks, and then hits the lm_head to generate the final prediction.2
 
+This code change marks a fundamental shift from a simple **Bigram** model to the architecture of a **Transformer**. Here is the breakdown from the root:
+
+### 1. The Definitions
+*   **`vocab_size`**: This is the total number of unique tokens (characters, in our case) the model knows. Since we are doing character-level modeling on *tiny Shakespeare*, `vocab_size` is 65.
+*   **`n_embed`**: This is the **embedding dimension**. It represents the size of the "feature vector" used to represent each token inside the model. Instead of just using a raw number, we now map each character into a vector space of size `n_embed` (e.g., 32 or 384).
+
+### 2. What was earlier?
+Originally, we used a single `nn.Embedding(vocab_size, vocab_size)` table. 
+*   This meant the model directly mapped each character ID to a set of logit scores (the size of the vocabulary) for the *next* character.
+*   **The Problem**: It was a "lookup table" that couldn't learn complex patterns. Because the output was tied directly to the vocabulary size, you couldn't easily add hidden layers or increase the model's "thinking" capacity.
+
+### 3. What is happening now?
+We have split the process into two distinct stages:
+
+*   **`self.token_embedding_table`**: This acts as the **input layer**. It takes the input token and converts it into a rich, learnable vector of size `n_embed`. This is the "language" the internal layers of the Transformer speak.
+*   **`self.lm_head` (Language Modeling Head)**: This is the **output layer**. It is a `nn.Linear` layer that takes those internal vectors (after they have been processed by all the Transformer blocks) and projects them back into the `vocab_size` (65) so the model can output a prediction for the next character.
+
+### Why the change?
+This **level of indirection** is essential for building a **Transformer**:
+1.  **Flexibility**: You can now choose any `n_embed` size to increase the model's internal processing power without forcing the input layer to match the output vocabulary size.
+2.  **Intermediate Processing**: Between the `token_embedding_table` and the `lm_head`, we now have the empty space required to insert **Self-Attention blocks** and **Feed-Forward layers**. The data starts as an embedding, gets transformed and "thinks" through multiple layers, and finally gets decoded by the `lm_head`.
