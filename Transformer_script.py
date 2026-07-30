@@ -58,7 +58,46 @@ def estimate_loss(): # average outs the loss for eval_iterations
     model.train()
     return out
 
-# super simple bigram model
+
+class Head(nn.Module):
+    '''This class is responsible for creating the Attention or Communication Mechanism - that lets the tokens communicate with past timesteps'''
+    def __init__(self, head_size):
+        super().__init__()
+        self.key=nn.Linear(n_embed, head_size, bias=False) # The attentione heads are like channels of dimension say (32,16) i.e 32 other tokens define the word and 16 other timesteps contributes to its semantic meaning
+        self.query=nn.Linear(n_embed, head_size, bias =False)
+        self.value=nn.Linear(n_embed, head_size, bias =False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a variable that is needed for use, but is not a model param. 
+
+    def forward(self, x):
+
+        # Extracting tensor shape params
+        B,T,C=x.shape
+        # mapping key, query and value to the input
+        k=self.key(x)   
+        q=self.query(x)
+        v=self.value(x)
+
+        weights= q @ k.transpose(-2,-1) * C**(-0.5) # Scaled Dot product
+        weights=weights.masked_fill(self.tril[:T,:T]==0, float('-inf')) # type: ignore
+        weights=F.softmax(weights, dim=-1)
+
+        # Perform weighted aggregation of values
+        out=weights @ v
+        return out
+
+# Now that we are done with Single-Head Attention - lets implement Multi_head attention - replicas of how many heads we want.
+# Each head is responsible for some definite and specific purpose - say head 1 captures relationship of how are vowels related, while say head 2 maps how the punctuation contributes to the next token 
+class MultiHead(nn.Module):
+    '''Multiple Heads of Self Attention in parallel'''
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads=nn.ModuleList([Head(head_size) for _ in range(num_heads)]) # using the function from base class we can create a list of submodules within a list
+
+    def forward(self,x):
+        # here we are just concatenating all the separate heads over the last dimention(channel dim) into a single unit
+        return torch.cat([h(x) for h in self.heads], dim=-1) # take every single heads from the list of multiheads and for each of them compute k,q,v using x as argument and then concat all of them back
+
+# Gradually improved architeture of a naive Bigram model implemnted with M-H attention
 class BigramLanguageModel(nn.Module):
 
     def __init__(self):
@@ -67,7 +106,10 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         # We besides creating the embedding table to store the embedding vectors for every token also create a positional_embeddding table for positional encoding
         self.positional_embedding_table=nn.Embedding(block_size,n_embed)
-        self.sa = Head(n_embed) # creating the self attention head 
+        # self.sa = Head(n_embed) # creating the self attention head 
+
+        # Now that we have evolved to Multiple heads, lets comment out Self-head and implement Multi-head attention
+        self.mha = MultiHead(num_heads=4, head_size=n_embed//4) # we are dividing the entire num of embedd. into 4 sets for 4 heads of uniform size. (4 * 8Dim = 32Dim embedd vector)
         self.lm_head=nn.Linear(n_embed, vocab_size)
                 
 
@@ -77,7 +119,7 @@ class BigramLanguageModel(nn.Module):
         tok_embd = self.token_embedding_table(idx) # (B,T,C)
         pos_embd = self.positional_embedding_table(torch.arange(T, device=device)) # creating pos embd vectors from 0 to range T-1 of shape (T,C)
         x=tok_embd + pos_embd
-        x = self.sa(x)
+        x = self.mha(x)
         logits=self.lm_head(x)
 
         if targets is None:
@@ -108,33 +150,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
 
-
-class Head(nn.Module):
-    '''This class is responsible for creating the Attention or Communication Mechanism - that lets the tokens communicate with past timesteps'''
-    def __init__(self, head_size):
-        super().__init__()
-        self.key=nn.Linear(n_embed, head_size) # The attentione heads are like channels of dimension say (32,16) i.e 32 other tokens define the word and 16 other timesteps contributes to its semantic meaning
-        self.query=nn.Linear(n_embed, head_size, bias =False)
-        self.value=nn.Linear(n_embed, head_size, bias =False)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a variable that is needed for use, but is not a model param. 
-
-    def forward(self, x):
-
-        # Extracting tensor shape params
-        B,T,C=x.shape
-        # mapping key, query and value to the input
-        k=self.key(x)   
-        q=self.query(x)
-        v=self.value(x)
-
-        weights= q @ k.transpose(-2,-1) * C**(-0.5) # Scaled Dot product
-        weights=weights.masked_fill(self.tril[:T,:T]==0, float('-inf'))
-        weights=F.softmax(weights, dim=-1)
-
-        # Perform weighted aggregation of values
-        out=weights @ v
-        return out
-
+    
 model = BigramLanguageModel()
 m = model.to(device)
 
