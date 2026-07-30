@@ -5,9 +5,9 @@ from torch.nn import functional as F
 # Hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 12 # what is the maximum context length for predictions?
-max_iters = 3000
+max_iters = 5000
 eval_interval = 300
-learning_rate = 1e-2
+learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embed=32
@@ -67,6 +67,7 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         # We besides creating the embedding table to store the embedding vectors for every token also create a positional_embeddding table for positional encoding
         self.positional_embedding_table=nn.Embedding(block_size,n_embed)
+        self.sa = Head(n_embed) # creating the self attention head 
         self.lm_head=nn.Linear(n_embed, vocab_size)
                 
 
@@ -76,6 +77,7 @@ class BigramLanguageModel(nn.Module):
         tok_embd = self.token_embedding_table(idx) # (B,T,C)
         pos_embd = self.positional_embedding_table(torch.arange(T, device=device)) # creating pos embd vectors from 0 to range T-1 of shape (T,C)
         x=tok_embd + pos_embd
+        x = self.sa(x)
         logits=self.lm_head(x)
 
         if targets is None:
@@ -91,8 +93,11 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
+
+            # idx can go out of range that's not present in the scope of Embeddings table, thus we need to filter it
+            idx_cond=idx[:, -block_size:]
             # get the predictions
-            logits, loss = self(idx) # forward(idx)
+            logits, loss = self(idx_cond) # forward(idx_cond)
             # focus only on the last time step
             logits = logits[:, -1, :] # becomes (B, C)
             # apply softmax to get probabilities
@@ -102,6 +107,33 @@ class BigramLanguageModel(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
+
+
+class Head(nn.Module):
+    '''This class is responsible for creating the Attention or Communication Mechanism - that lets the tokens communicate with past timesteps'''
+    def __init__(self, head_size):
+        super().__init__()
+        self.key=nn.Linear(n_embed, head_size) # The attentione heads are like channels of dimension say (32,16) i.e 32 other tokens define the word and 16 other timesteps contributes to its semantic meaning
+        self.query=nn.Linear(n_embed, head_size, bias =False)
+        self.value=nn.Linear(n_embed, head_size, bias =False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a variable that is needed for use, but is not a model param. 
+
+    def forward(self, x):
+
+        # Extracting tensor shape params
+        B,T,C=x.shape
+        # mapping key, query and value to the input
+        k=self.key(x)   
+        q=self.query(x)
+        v=self.value(x)
+
+        weights= q @ k.transpose(-2,-1) * C**(-0.5) # Scaled Dot product
+        weights=weights.masked_fill(self.tril[:T,:T]==0, float('-inf'))
+        weights=F.softmax(weights, dim=-1)
+
+        # Perform weighted aggregation of values
+        out=weights @ v
+        return out
 
 model = BigramLanguageModel()
 m = model.to(device)
