@@ -97,20 +97,63 @@ class MultiHead(nn.Module):
         # here we are just concatenating all the separate heads over the last dimention(channel dim) into a single unit
         return torch.cat([h(x) for h in self.heads], dim=-1) # take every single heads from the list of multiheads and for each of them compute k,q,v using x as argument and then concat all of them back
 
+
+# Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
+# Thus we need a linear single layer of network with relu non-linearity for propagation of the logits - with feedforward the loss further decreased from 2.28 to 2.23 
+class FeedForward(nn.Module):
+    '''a simnple linear layer followed by non-linearity'''
+
+    def __init__(self, n_embed):
+        super().__init__()
+        self.ffnet=nn.Sequential(
+            nn.Linear(n_embed, n_embed),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.ffnet(x) # executing each tokens on the feed forward neural net
+        
+
+
+# Now by far whatever we did in the Decoder architecture (Pos encoding, sh, mh, scaled dot prod, feedforwd) can be trated as block of calculation & computation. Now to improve performance we can repeat these block k times 
+class Block(nn.Module):
+    '''Transformer Block: Communication (Attention) followed by Computation'''
+
+    def __init__(self, n_embed, n_head):
+        super().__init__()
+        head_size=n_embed//n_head
+        self.attention=MultiHead(n_head, head_size)
+        self.ffwd=FeedForward(n_embed)
+
+    def forward(self, x):
+        x=self.attention(x)
+        x=self.ffwd(x)
+        return x
+# Block of Transformer creates Abstraction by judt defining the predefined methods and objects for Communication and Computation repeatedly
+
+
 # Gradually improved architeture of a naive Bigram model implemnted with M-H attention
 class BigramLanguageModel(nn.Module):
 
+    # Configurations 
     def __init__(self):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         # We besides creating the embedding table to store the embedding vectors for every token also create a positional_embeddding table for positional encoding
         self.positional_embedding_table=nn.Embedding(block_size,n_embed)
-        # self.sa = Head(n_embed) # creating the self attention head 
-
+        # self.sa = Head(n_embed) # creating the self attention head - commented out since we have improved to Multi_head attention
         # Now that we have evolved to Multiple heads, lets comment out Self-head and implement Multi-head attention
-        self.mha = MultiHead(num_heads=4, head_size=n_embed//4) # we are dividing the entire num of embedd. into 4 sets for 4 heads of uniform size. (4 * 8Dim = 32Dim embedd vector)
-        self.lm_head=nn.Linear(n_embed, vocab_size)
+        # self.mha = MultiHead(num_heads=4, head_size=n_embed//4) # we are dividing the entire num of embedd. into 4 sets for 4 heads of uniform size. (4 * 8Dim = 32Dim embedd vector)
+        # self.feedfwd = FeedForward(n_embed)
+
+        # We now comment out all the isolated unit level operations, since we have created a Block containing the same operations and we can just Sequentially repeat them
+        self.blocks = nn.Sequential(
+            Block(n_embed=32, n_head=4),
+            Block(n_embed=32, n_head=4),
+            Block(n_embed=32, n_head=4),
+        )
+        self.lm_head = nn.Linear(n_embed, vocab_size)
                 
 
     def forward(self, idx, targets=None):
@@ -119,7 +162,11 @@ class BigramLanguageModel(nn.Module):
         tok_embd = self.token_embedding_table(idx) # (B,T,C)
         pos_embd = self.positional_embedding_table(torch.arange(T, device=device)) # creating pos embd vectors from 0 to range T-1 of shape (T,C)
         x=tok_embd + pos_embd
-        x = self.mha(x)
+
+        # x = self.mha(x)
+        # s=self.feedfwd(x) # (B,T,C)
+
+        x=self.blocks(x)
         logits=self.lm_head(x)
 
         if targets is None:
