@@ -85,20 +85,23 @@ class Head(nn.Module):
         out=weights @ v
         return out
 
-# Now that we are done with Single-Head Attention - lets implement Multi_head attention - replicas of how many heads we want.
+# Improvement: I - Now that we are done with Single-Head Attention - lets implement Multi_head attention - replicas of how many heads we want.
 # Each head is responsible for some definite and specific purpose - say head 1 captures relationship of how are vowels related, while say head 2 maps how the punctuation contributes to the next token 
 class MultiHead(nn.Module):
     '''Multiple Heads of Self Attention in parallel'''
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads=nn.ModuleList([Head(head_size) for _ in range(num_heads)]) # using the function from base class we can create a list of submodules within a list
+        # we shall create another linear layer: projection that forks off from the main path, directly takes the multi_head concatenated vectors and perform a linear transformation on it and joins back to the main path
+        self.proj = nn.Linear(n_embed, n_embed) # takes n_embed input and outputs linearly transformed n_embed....the dim remains same 
 
     def forward(self,x):
         # here we are just concatenating all the separate heads over the last dimention(channel dim) into a single unit
-        return torch.cat([h(x) for h in self.heads], dim=-1) # take every single heads from the list of multiheads and for each of them compute k,q,v using x as argument and then concat all of them back
+        out = torch.cat([h(x) for h in self.heads], dim=-1) # take every single heads from the list of multiheads and for each of them compute k,q,v using x as argument and then concat all of them back
+        out = self.proj(out)
+        return out # here we again join the projecrtion back into the main residual pathway
 
-
-# Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
+# Improvement: II - Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
 # Thus we need a linear single layer of network with relu non-linearity for propagation of the logits - with feedforward the loss further decreased from 2.28 to 2.23 
 class FeedForward(nn.Module):
     '''a simnple linear layer followed by non-linearity'''
@@ -106,16 +109,18 @@ class FeedForward(nn.Module):
     def __init__(self, n_embed):
         super().__init__()
         self.ffnet=nn.Sequential(
-            nn.Linear(n_embed, n_embed),
+            nn.Linear(n_embed, 4* n_embed),
             nn.ReLU(),
+            nn.Linear(4*n_embed, n_embed) # similar skip connections we build here for optimization of the network
         )
+# why the inner layer of feedforward net had 4 times the num of embeddings...i.e 4 X 32?? This is done purely based on the paper ("Attention is all You Need"). We do so to increase the computation and sensitivity upto 4 times in the forked branch and then again reduce it to normal n_embed while joining the forked branch to the main branch - After training we can see the loss further decreasd to 1.913(train) and 2.05(val)
 
     def forward(self, x):
         return self.ffnet(x) # executing each tokens on the feed forward neural net
         
 
 
-# Now by far whatever we did in the Decoder architecture (Pos encoding, sh, mh, scaled dot prod, feedforwd) can be trated as block of calculation & computation. Now to improve performance we can repeat these block k times 
+# Improvement: III - Now by far whatever we did in the Decoder architecture (Pos encoding, sh, mh, scaled dot prod, feedforwd) can be trated as block of calculation & computation. Now to improve performance we can repeat these block k times 
 class Block(nn.Module):
     '''Transformer Block: Communication (Attention) followed by Computation'''
 
@@ -126,11 +131,13 @@ class Block(nn.Module):
         self.ffwd=FeedForward(n_embed)
 
     def forward(self, x):
-        x=self.attention(x)
-        x=self.ffwd(x)
+        x = x + self.attention(x) # why x+ ?? This is an upgrade where we use skip connections for optimization, we fork off from the main bakprop branch, compute and then join the branch back again
+        x = x + self.ffwd(x) # This prevents 
         return x
 # Block of Transformer creates Abstraction by judt defining the predefined methods and objects for Communication and Computation repeatedly
+# But repeating blocks also maked the network deep, therefore we need to optimize the network - techniques: Residual(skip) Connection, batch norm, dropout  
 
+# Improvement: IV - SKip Connection: During Back Propagation - : Gradients (the error signals) travel backward through those same layers to tweak the weights via the Chain Rule. In a very deep network without skip connections, as the gradient travels backward through dozens of linear layers and activation functions, it gets multiplied over and over again: If the weights are slightly less than (1.0), the gradient continuously shrinks until it becomes virtually zero (0.0000...). The early layers of the model stop learning completely.If the weights are slightly greater than (1.0), the gradient multiplies exponentially until it hits infinity (NaN), crashing your training entirely.A skip connection modifies the architectural layout of a neural network block. Instead of forcing the data vector \(x\) to strictly pass through a layer \(F(x)\), the connection splits the path, allowing the original raw input to hop over the layer and be added directly to the output. Output = x + f(x) --------> Changes made under forard function in Block class and applied to MultiHead and Feedfwd class. 
 
 # Gradually improved architeture of a naive Bigram model implemnted with M-H attention
 class BigramLanguageModel(nn.Module):
