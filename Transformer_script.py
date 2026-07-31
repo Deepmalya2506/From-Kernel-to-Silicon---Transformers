@@ -5,12 +5,13 @@ from torch.nn import functional as F
 # Hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 12 # what is the maximum context length for predictions?
-max_iters = 5000
+max_iters = 7000
 eval_interval = 300
 learning_rate = 1e-3
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embed=32
+dropout=0.2
 # ------------
 
 torch.manual_seed(2506)
@@ -67,6 +68,7 @@ class Head(nn.Module):
         self.query=nn.Linear(n_embed, head_size, bias =False)
         self.value=nn.Linear(n_embed, head_size, bias =False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a variable that is needed for use, but is not a model param. 
+        self.drop=nn.Dropout(dropout)
 
     def forward(self, x):
 
@@ -80,6 +82,7 @@ class Head(nn.Module):
         weights= q @ k.transpose(-2,-1) * C**(-0.5) # Scaled Dot product
         weights=weights.masked_fill(self.tril[:T,:T]==0, float('-inf')) # type: ignore
         weights=F.softmax(weights, dim=-1)
+        weights = self.drop(weights)
 
         # Perform weighted aggregation of values
         out=weights @ v
@@ -95,12 +98,13 @@ class MultiHead(nn.Module):
         self.heads=nn.ModuleList([Head(head_size) for _ in range(num_heads)]) # using the function from base class we can create a list of submodules within a list
         # we shall create another linear layer: projection that forks off from the main path, directly takes the multi_head concatenated vectors and perform a linear transformation on it and joins back to the main path
         self.proj = nn.Linear(n_embed, n_embed) # takes n_embed input and outputs linearly transformed n_embed....the dim remains same 
+        self.drop=nn.Dropout(dropout)
 
     def forward(self,x):
         # here we are just concatenating all the separate heads over the last dimention(channel dim) into a single unit
         out = torch.cat([h(x) for h in self.heads], dim=-1) # take every single heads from the list of multiheads and for each of them compute k,q,v using x as argument and then concat all of them back
         out = self.proj(out)
-        return out # here we again join the projecrtion back into the main residual pathway
+        return self.drop(out) # here we again join the projecrtion back into the main residual pathway
 
 # Improvement: II - FeedForward Network
 #  Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
@@ -113,7 +117,8 @@ class FeedForward(nn.Module):
         self.ffnet=nn.Sequential(
             nn.Linear(n_embed, 4* n_embed),
             nn.ReLU(),
-            nn.Linear(4*n_embed, n_embed) # similar skip connections we build here for optimization of the network
+            nn.Linear(4*n_embed, n_embed), # similar skip connections we build here for optimization of the network
+            nn.Dropout(dropout)
         )
 # why the inner layer of feedforward net had 4 times the num of embeddings...i.e 4 X 32?? This is done purely based on the paper ("Attention is all You Need"). We do so to increase the computation and sensitivity upto 4 times in the forked branch and then again reduce it to normal n_embed while joining the forked branch to the main branch - After training we can see the loss further decreasd to 1.913(train) and 2.05(val)
 
@@ -188,9 +193,13 @@ class Block(nn.Module):
 # x.shape
 #----------------------------------------------------------------------------------------------------------------------------------
 # We now know why not batchnorm and why layernorm applies to our Transformer architecture - thus layernorm implemented in Block class
-# Present status after LayerNorm: step 4800: train loss 1.9434, val loss 2.0511
+# Present status after LayerNorm: step 4800: train loss 1.9299, val loss 2.0375
 
-# Gradually improved architeture of a naive Bigram model implemnted with M-H attention
+
+# Improvement VI: We add DropOut layers before the forked branch connects back ot residuals - This drops a % of neurons from each layer thereby generalizing the model - DropOut added at head, MultiHead, D
+# status: step 4800: train loss 2.0543, val loss 2.1065
+
+# Gradually improved architeture of a naive Bigram model implemnted with M-H attention, FeedForward class
 class BigramLanguageModel(nn.Module):
 
     # Configurations 
