@@ -85,7 +85,8 @@ class Head(nn.Module):
         out=weights @ v
         return out
 
-# Improvement: I - Now that we are done with Single-Head Attention - lets implement Multi_head attention - replicas of how many heads we want.
+# Improvement: I - Multi-head Attention
+# Now that we are done with Single-Head Attention - lets implement Multi_head attention - replicas of how many heads we want.
 # Each head is responsible for some definite and specific purpose - say head 1 captures relationship of how are vowels related, while say head 2 maps how the punctuation contributes to the next token 
 class MultiHead(nn.Module):
     '''Multiple Heads of Self Attention in parallel'''
@@ -101,7 +102,8 @@ class MultiHead(nn.Module):
         out = self.proj(out)
         return out # here we again join the projecrtion back into the main residual pathway
 
-# Improvement: II - Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
+# Improvement: II - FeedForward Network
+#  Now by far whatever improvements we did, still we compute logits directly after the attention level. Though the loss decreased from 2.4 in ur first version to 2.2 in our latest- but still the logits were calculated directly, therefore the architecture don't get enough time to think upon what they found from other tokens
 # Thus we need a linear single layer of network with relu non-linearity for propagation of the logits - with feedforward the loss further decreased from 2.28 to 2.23 
 class FeedForward(nn.Module):
     '''a simnple linear layer followed by non-linearity'''
@@ -120,7 +122,8 @@ class FeedForward(nn.Module):
         
 
 
-# Improvement: III - Now by far whatever we did in the Decoder architecture (Pos encoding, sh, mh, scaled dot prod, feedforwd) can be trated as block of calculation & computation. Now to improve performance we can repeat these block k times 
+# Improvement: III - Block Architecture
+# Now by far whatever we did in the Decoder architecture (Pos encoding, sh, mh, scaled dot prod, feedforwd) can be trated as block of calculation & computation. Now to improve performance we can repeat these block k times 
 class Block(nn.Module):
     '''Transformer Block: Communication (Attention) followed by Computation'''
 
@@ -129,15 +132,63 @@ class Block(nn.Module):
         head_size=n_embed//n_head
         self.attention=MultiHead(n_head, head_size)
         self.ffwd=FeedForward(n_embed)
+        self.ln1=nn.LayerNorm(n_embed) # creating 2 layernorm layers
+        self.ln2=nn.LayerNorm(n_embed)
 
     def forward(self, x):
-        x = x + self.attention(x) # why x+ ?? This is an upgrade where we use skip connections for optimization, we fork off from the main bakprop branch, compute and then join the branch back again
-        x = x + self.ffwd(x) # This prevents 
+        x = x + self.attention(self.ln1(x)) # why x+ ?? This is an upgrade where we use skip connections for optimization, we fork off from the main bakprop branch, compute and then join the branch back again
+        x = x + self.ffwd(self.ln2(x)) # This prevents 
         return x
 # Block of Transformer creates Abstraction by judt defining the predefined methods and objects for Communication and Computation repeatedly
 # But repeating blocks also maked the network deep, therefore we need to optimize the network - techniques: Residual(skip) Connection, batch norm, dropout  
 
-# Improvement: IV - SKip Connection: During Back Propagation - : Gradients (the error signals) travel backward through those same layers to tweak the weights via the Chain Rule. In a very deep network without skip connections, as the gradient travels backward through dozens of linear layers and activation functions, it gets multiplied over and over again: If the weights are slightly less than (1.0), the gradient continuously shrinks until it becomes virtually zero (0.0000...). The early layers of the model stop learning completely.If the weights are slightly greater than (1.0), the gradient multiplies exponentially until it hits infinity (NaN), crashing your training entirely.A skip connection modifies the architectural layout of a neural network block. Instead of forcing the data vector \(x\) to strictly pass through a layer \(F(x)\), the connection splits the path, allowing the original raw input to hop over the layer and be added directly to the output. Output = x + f(x) --------> Changes made under forard function in Block class and applied to MultiHead and Feedfwd class. 
+# Improvement: IV - SKip Connection: 
+# During Back Propagation - : Gradients (the error signals) travel backward through those same layers to tweak the weights via the Chain Rule. In a very deep network without skip connections, as the gradient travels backward through dozens of linear layers and activation functions, it gets multiplied over and over again: If the weights are slightly less than (1.0), the gradient continuously shrinks until it becomes virtually zero (0.0000...). The early layers of the model stop learning completely.If the weights are slightly greater than (1.0), the gradient multiplies exponentially until it hits infinity (NaN), crashing your training entirely.A skip connection modifies the architectural layout of a neural network block. Instead of forcing the data vector \(x\) to strictly pass through a layer \(F(x)\), the connection splits the path, allowing the original raw input to hop over the layer and be added directly to the output. Output = x + f(x) --------> Changes made under forard function in Block class and applied to MultiHead and Feedfwd class.
+
+
+# Improvement: V - Layer Norm
+# When we update a neural network's parameters via an optimizer, the weights of the earliest layers change. Consequently, the distributions of inputs to the deeper layers shift constantly throughout training. This shifting is called Internal Covariate Shift. Deeper layers are forced to chase a moving target, slowing down learning convergence and increasing the likelihood of vanishing or exploding gradients. 
+# class BatchNorm1D:
+#     '''BatchNorm1D -> LayerNorm. This is used as sequences in a batch may vary in length, therefore batchnorm would be messy - thus we use layer norm which is same in principle just applied for individual vectors independently along the feature axis, making it independent of sequence length and batch size.'''
+#----------------------------------------------------------------------------------------------------------------------------------
+#     def __init__(self, dim, eps=1e-5, momentum=0.1):
+#         self.eps=eps
+#         self.momentum=momentum
+#         self.training=True
+
+#         #parameters with backprop
+#         self.gamma=torch.ones(dim)
+#         self.beta=torch.zeros(dim)
+
+#         #Buffers (trained with a running momentum update)
+#         self.running_mean=torch.ones(dim)
+#         self.running_var=torch.ones(dim)
+
+#     def __call__(self, x):
+#         if self.training:
+#             xmean=x.mean(0, keepdim=True)
+#             xvar=x.var(0, keepdim=True)
+#         else:
+#             xmean=self.running_mean
+#             xvar=self.running_var
+#         xhat=(x-xmean)/torch.sqrt(xvar+self.eps) # implying the formula to compute xhat; this is the Normalize to unite variance step that makes the inter layer architecture, gradients stable
+#         self.out=self.gamma*xhat + self.beta
+#         if self.training:
+#             self.running_mean = (1-self.momentum)*self.running_mean + self.momentum* xmean
+#             self.running_var = (1-self.momentum)*self.running_var + self.momentum* xvar
+#         return self.out
+
+#     def parameters(self):
+#         return [self.gamma, self.beta]
+
+# torch.manual_seed(2506)
+# module=BatchNorm1D(dim=100)
+# x=torch.randn(32, 100)
+# x=module(x)
+# x.shape
+#----------------------------------------------------------------------------------------------------------------------------------
+# We now know why not batchnorm and why layernorm applies to our Transformer architecture - thus layernorm implemented in Block class
+# Present status after LayerNorm: step 4800: train loss 1.9434, val loss 2.0511
 
 # Gradually improved architeture of a naive Bigram model implemnted with M-H attention
 class BigramLanguageModel(nn.Module):
@@ -159,6 +210,7 @@ class BigramLanguageModel(nn.Module):
             Block(n_embed=32, n_head=4),
             Block(n_embed=32, n_head=4),
             Block(n_embed=32, n_head=4),
+            nn.LayerNorm(n_embed), # We also normalize each vectors independently before providing it to the final linear layer
         )
         self.lm_head = nn.Linear(n_embed, vocab_size)
                 
@@ -204,7 +256,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
 
-    
+
 model = BigramLanguageModel()
 m = model.to(device)
 

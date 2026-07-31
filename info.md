@@ -485,7 +485,6 @@ Encoded tensor
 1,9,9
 ]
 ```
-
 ---
 
 # Phase 2 — The Old Neural Bigram Model
@@ -578,8 +577,8 @@ Consider the character
 ```text
 'l'
 ```
+(B,T,C)
 
-Inside
 
 ```text
 All
