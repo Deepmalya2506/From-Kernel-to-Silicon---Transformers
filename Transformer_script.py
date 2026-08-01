@@ -3,14 +3,15 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # Hyperparameters
-batch_size = 32 # how many independent sequences will we process in parallel?
-block_size = 12 # what is the maximum context length for predictions?
-max_iters = 7000
-eval_interval = 300
-learning_rate = 1e-3
+batch_size = 64 # how many independent sequences will we process in parallel?
+block_size = 256 # what is the maximum context length for predictions?
+max_iters = 5000
+eval_interval = 500
+learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-n_embed=32
+n_embed=384
+n_head=6    # therefore every head (head_size)= 384//6 = 64 dim
 dropout=0.2
 # ------------
 
@@ -216,9 +217,12 @@ class BigramLanguageModel(nn.Module):
 
         # We now comment out all the isolated unit level operations, since we have created a Block containing the same operations and we can just Sequentially repeat them
         self.blocks = nn.Sequential(
-            Block(n_embed=32, n_head=4),
-            Block(n_embed=32, n_head=4),
-            Block(n_embed=32, n_head=4),
+            Block(n_embed=n_embed, n_head=n_head),
+            Block(n_embed=n_embed, n_head=n_head),
+            Block(n_embed=n_embed, n_head=n_head),
+            Block(n_embed=n_embed, n_head=n_head),
+            Block(n_embed=n_embed, n_head=n_head),
+            Block(n_embed=n_embed, n_head=n_head),
             nn.LayerNorm(n_embed), # We also normalize each vectors independently before providing it to the final linear layer
         )
         self.lm_head = nn.Linear(n_embed, vocab_size)
@@ -268,6 +272,7 @@ class BigramLanguageModel(nn.Module):
 
 model = BigramLanguageModel()
 m = model.to(device)
+print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters') # Roughly around 10M params on a 1M char dataset
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
