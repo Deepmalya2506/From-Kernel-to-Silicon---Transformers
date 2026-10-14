@@ -65,7 +65,8 @@ The codebase is organized into sequential stages, illustrating how resolving spe
 6. **V06 - Residual Connections**: Resolves vanishing gradients across deep layer stacks using identity skip paths ($x + F(x)$).
 7. **V07 - Pre-Layer Normalization**: Stabilizes training variance by placing LayerNorm before attention and FFN blocks.
 8. **V08 - Regularization & Final System**: Adds dropout across projections, residual paths, and attention weights for generalized sampling.
-
+---
+```
 Bigram
     ↓
 Need memory
@@ -101,6 +102,7 @@ Need stability
 LayerNorm
     ↓
 Decoder-only GPT
-
+```
+---
 *Details of evolution at stages and Walkthrough given in status.md*
 
